@@ -4,9 +4,13 @@ class CloudflareManager:
     __cloudfaredPid = []
     __prootPids = []
     logPathDir=""
+    # logfiledict = {}
+    logFiles = []
     if os.name == 'nt':
-        binPath = "C:\\Program Files\\cloudflare\\bin"
-        logPathDir = "C:\\Program Files\\cloudflare\\log"
+        binPath = r'C:\Program Files\cloudflare\bin'
+        logPathDir = os.path.join(os.getenv("TEMP"),"cloudflare")
+        if not os.path.exists(logPathDir):
+            os.makedirs(logPathDir)
     if os.name == 'posix':
         if "/data/data/com.termux/files" in os.getcwd():
             binPath = "/data/data/com.termux/files/usr/bin"
@@ -15,11 +19,20 @@ class CloudflareManager:
             binPath = "/usr/bin"
             logPathDir = "/home/cloudflare/log"
     @classmethod
+    def generateLogFile(cls, serverKey):
+        if f"log_{serverKey}.txt" not in cls.logFiles:
+            return [True, f"log{serverKey}.txt"]
+        else:
+            return [False, "This port is already in use. Try another"]
+    @classmethod
     def __runServer(cls, lhost: str, lport: int, logfilePath: str):
+        if os.path.exists(logfilePath):
+            os.remove(logfilePath) 
         if os.name == 'nt':
-            subprocess.Popen(f"{cls.binPath}\\cloudflared.exe -url {lhost}:{lport} --logfile {logfilePath}", shell=True)
+            os.chdir(cls.binPath)
+            os.system(f".\cloudflared.exe -url {lhost}:{lport} --logfile {logfilePath} 2>{os.devnull}")
         elif os.name == 'posix':
-            subprocess.Popen(f"{cls.binPath}/cloudflared -url {lhost}:{lport} --logfile {logfilePath}", shell=True)
+            os.system(f"cloudflared -url {lhost}:{lport} --logfile {logfilePath} 2>{os.devnull}")
     @classmethod
     def __getPidOfServer(cls):
         validPid=None
@@ -27,11 +40,12 @@ class CloudflareManager:
             try:
                 rawpids = subprocess.check_output("tasklist | findstr cloudflared", shell=True)
                 rawpids = rawpids.decode("utf-8")
-                rawpids = re.findall(r"cloudflared\.exe\s+(\d+)\s+Console")
+                rawpids = re.findall(r"cloudflared\.exe\s+(\d+)\s+Console", rawpids)
             except subprocess.CalledProcessError as e:
-                sys.stderr.write(e)
+                sys.stderr.write(str(e)+"\n")
                 sys.stderr.write("Unable to get the pid of the this instance of cloudflared")
-                exit(1)
+                # exit(1)
+                return None
         if os.name == 'posix':
             try:
                 rawpids1 = subprocess.check_output("pgrep -af cloudflared | awk '{print $1}'", shell=True)
@@ -54,7 +68,7 @@ class CloudflareManager:
                 except:
                     pass
             except subprocess.CalledProcessError as e:
-                sys.stderr.write(e)
+                sys.stderr.write(str(e) + "\n")
                 sys.stderr.write("Unable to get the pid of the this instance of cloudflared")
                 exit(1)
         currentPidListLen = len(cls.__cloudfaredPid)
@@ -66,27 +80,56 @@ class CloudflareManager:
             return cls.__cloudfaredPid[-1]
         return validPid
     @staticmethod
-    def startCloudflareServer(lhost: str, lport: int, logfilePath: str=os.path.join(logPathDir, 'log.txt')):
-        updateCurrentPids = CloudflareManager.__getPidOfServer()
+    def startCloudflareServer(lhost: str, lport: int):
         __key = f"{lhost}:{lport}"
+        __fileKey = f"{lhost}_{lport}"
+        logfilePath = CloudflareManager.generateLogFile(__fileKey)
+        if logfilePath[0] == True:
+            logfilePath = os.path.join(CloudflareManager.logPathDir, logfilePath[1])
+        else:
+            sys.stderr.write(logfilePath[0])
+            return logfilePath
+        try:
+            updateCurrentPids = CloudflareManager.__getPidOfServer()
+        except:
+            pass
         if CloudflareManager.__cloudfaredServerAndPid.get(__key) is not None:
             if str(CloudflareManager.__cloudfaredServerAndPid.get(__key)) == str(updateCurrentPids):
                 return [False, "This server is already in use! Try again with different lhost and lport values!!"]
-        threading.Thread(target=CloudflareManager.__runServer(lhost, lport, logfilePath)).start()
-        time.sleep(1)
+        print("Going to start server")
+        threading.Thread(target=CloudflareManager.__runServer, args=[lhost, lport, logfilePath]).start()
+        print("Server running")
+        time.sleep(10)
         currentPid = CloudflareManager.__getPidOfServer()
         CloudflareManager.__cloudfaredServerAndPid[__key] = currentPid
+        CloudflareManager.logFiles.append(f"log{lhost}_{lport}.txt")
         link=None
         while True:
+            print("\n\nTrying to read the link\n\n")
             with open(logfilePath, "r") as logfile:
-                content = logfile.readlines()
+                content = logfile.read()
+                logfile.close()
                 if len(content) > 0:
-                    for line in content:
-                        link = re.findall(r'https://[-0-9a-z]*\.trycloudflare.com', line)
-                        if link:
-                            break
-                    break
+                    link = re.findall(r'https://[-0-9a-z]*\.trycloudflare.com', content)
+                    if link:
+                        break
+                    else:
+                        continue
         return link
-
-
-            
+@staticmethod
+def killServer(lhost, lport):
+    __key = f"{lhost}:{lport}"
+    if CloudflareManager.__cloudfaredServerAndPid.get(__key) is not None:
+        pidToKill = CloudflareManager.__cloudfaredServerAndPid[__key]
+        try:
+            os.kill(pidToKill, 9)
+        except OSError:
+            sys.stderr.write(f"Unable to kill Cloudflare pid: {pidToKill}. Kill it manually\n")
+            return [False, f"Unable to kill cloudflare pid: {pidToKill}. Kill it manually\n"]
+        CloudflareManager.__cloudfaredServerAndPid.pop(__key)
+        CloudflareManager.__cloudfaredPid.remove(pidToKill)
+        try:
+            CloudflareManager.logFiles.remove(os.path.join(CloudflareManager.logPathDir,f"log{lhost}_{lport}.txt"))
+        except:
+            pass
+        return [True, f"Successfully killed cloudflare pid: {pidToKill}"]
