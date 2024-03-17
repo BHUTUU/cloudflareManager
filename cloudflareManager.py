@@ -99,7 +99,7 @@ class CloudflareManager:
         print("Going to start server")
         threading.Thread(target=CloudflareManager.__runServer, args=[lhost, lport, logfilePath]).start()
         print("Server running")
-        time.sleep(10)
+        time.sleep(5)
         currentPid = CloudflareManager.__getPidOfServer()
         CloudflareManager.__cloudfaredServerAndPid[__key] = currentPid
         CloudflareManager.logFiles.append(f"log{lhost}_{lport}.txt")
@@ -116,20 +116,20 @@ class CloudflareManager:
                     else:
                         continue
         return link
-@staticmethod
-def killServer(lhost, lport):
-    __key = f"{lhost}:{lport}"
-    if CloudflareManager.__cloudfaredServerAndPid.get(__key) is not None:
-        pidToKill = CloudflareManager.__cloudfaredServerAndPid[__key]
-        try:
-            os.kill(pidToKill, 9)
-        except OSError:
-            sys.stderr.write(f"Unable to kill Cloudflare pid: {pidToKill}. Kill it manually\n")
-            return [False, f"Unable to kill cloudflare pid: {pidToKill}. Kill it manually\n"]
-        CloudflareManager.__cloudfaredServerAndPid.pop(__key)
-        CloudflareManager.__cloudfaredPid.remove(pidToKill)
-        try:
-            CloudflareManager.logFiles.remove(os.path.join(CloudflareManager.logPathDir,f"log{lhost}_{lport}.txt"))
-        except:
-            pass
-        return [True, f"Successfully killed cloudflare pid: {pidToKill}"]
+    @staticmethod
+    def killServer(lhost, lport):
+        __key = f"{lhost}:{lport}"
+        if CloudflareManager.__cloudfaredServerAndPid.get(__key) is not None:
+            pidToKill = CloudflareManager.__cloudfaredServerAndPid[__key]
+            try:
+                os.kill(pidToKill, 9)
+            except OSError:
+                sys.stderr.write(f"Unable to kill Cloudflare pid: {pidToKill}. Kill it manually\n")
+                return [False, f"Unable to kill cloudflare pid: {pidToKill}. Kill it manually\n"]
+            CloudflareManager.__cloudfaredServerAndPid.pop(__key)
+            CloudflareManager.__cloudfaredPid.remove(pidToKill)
+            try:
+                CloudflareManager.logFiles.remove(os.path.join(CloudflareManager.logPathDir,f"log{lhost}_{lport}.txt"))
+            except:
+                pass
+            return [True, f"Successfully killed cloudflare pid: {pidToKill}"]
